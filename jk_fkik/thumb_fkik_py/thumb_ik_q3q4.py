@@ -114,14 +114,20 @@ def thumb_ik_q3q4(P_target: np.ndarray, q1: float, q2: float,
     r_max = params.L2 + params.L3        # 最大可达距离
     
     if info.r > r_max:
-        info.status = 1
-        info.error_msg = f'目标点超出最大工作空间 (距离={info.r:.2f}mm > 最大={r_max:.2f}mm)'
-        return q3, q4, info
-    
+        scale = (r_max - 1e-4) / info.r
+        info.d_x *= scale
+        info.d_z *= scale
+        info.r = r_max - 1e-4
+        info.status = 2
+        info.error_msg = f'目标点超出最大工作空间 (距离超出)，已自动截断以保持移动'
+        
     if info.r < r_min:
-        info.status = 1
-        info.error_msg = f'目标点超出最小工作空间 (距离={info.r:.2f}mm < 最小={r_min:.2f}mm)'
-        return q3, q4, info
+        scale = (r_min + 1e-4) / info.r
+        info.d_x *= scale
+        info.d_z *= scale
+        info.r = r_min + 1e-4
+        info.status = 2
+        info.error_msg = f'目标点超出最小工作空间 (距离过近)，已自动截断以保持移动'
     
     # 解析求解 q3, q4
     q3_solutions = []

@@ -100,7 +100,10 @@ def thumb_ik_q1q2(P_target: np.ndarray, n_c: np.ndarray,
     
     # 检查法向量 X 分量
     if n_c[0] < -params.tol_normal:
-        print(f'\n[警告] 法向量 X 分量={n_c[0]:.4f} < 0，可能超出工作空间')
+        # 翻转法向，同一平面的另一个法向方向
+        n_c = -n_c
+        info.correction['applied'] = True
+        info.correction['method'] = 'flip_normal'
     
     # 保存归一化后的法向量
     info.n_c = n_c

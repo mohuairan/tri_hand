@@ -77,8 +77,8 @@
     <geom name="stand_pole" type="cylinder" size="0.015 0.1" pos="0 0 0.1" rgba="0.2 0.2 0.2 1"/>
 
     <!-- ==================== 手掌基座 ==================== -->
-    <!-- euler="-1.5708 0 0" 将掌心旋转至与地面平行，手指指向前方 (+Y) -->
-    <body name="palm" pos="0 0 0.2" euler="-1.5708 0 0">
+    <!-- 手掌竖立：手指朝上(+Z)，掌心朝前(+Y) -->
+    <body name="palm" pos="0 0 0.2">
       <!-- 移除 freejoint，固定在支架上 -->
       <inertial pos="0 0 0" mass="0.15" 
                 diaginertia="0.00005 0.00008 0.00003"/>
@@ -166,7 +166,7 @@
         
         并联机构 (d1,d2→q1,q2) 通过控制层映射
       -->
-      <body name="index_base" pos="0.027 0 0.072" euler="-0.0944 0 0">
+      <body name="index_base" pos="-0.027 0 0.068" euler="-0.0944 0 0">
         <inertial pos="0 0 0" mass="0.002" 
                   diaginertia="0.0000001 0.0000001 0.0000001"/>
         <!-- q1: 屈伸 (绕 X 轴) -->
@@ -178,7 +178,7 @@
                     diaginertia="0.0000001 0.0000001 0.0000001"/>
           <!-- q2: 外展 (绕 Y 轴) -->
           <joint name="index_q2" class="finger_joint" type="hinge"
-                 axis="0 1 0" range="-0.7854 0.7854" ref="0"/>
+                 axis="0 1 0" range="-0.35 0.35" ref="0"/>
           
           <!-- PM 连杆: 42.39mm 沿 z 轴 -->
           <body name="index_link_PM" pos="0 0 0">
@@ -221,7 +221,7 @@
       <!-- ============================================================ -->
       <!--                      中指 (Middle)                            -->
       <!-- ============================================================ -->
-      <body name="middle_base" pos="0.009 0 0.074" euler="-0.0944 0 0">
+      <body name="middle_base" pos="-0.009 0 0.072" euler="-0.0944 0 0">
         <inertial pos="0 0 0" mass="0.002" 
                   diaginertia="0.0000001 0.0000001 0.0000001"/>
         <joint name="middle_q1" class="finger_joint" type="hinge"
@@ -230,7 +230,7 @@
           <inertial pos="0 0 0" mass="0.002" 
                     diaginertia="0.0000001 0.0000001 0.0000001"/>
           <joint name="middle_q2" class="finger_joint" type="hinge"
-                 axis="0 1 0" range="-0.7854 0.7854" ref="0"/>
+                 axis="0 1 0" range="-0.35 0.35" ref="0"/>
           <body name="middle_link_PM" pos="0 0 0">
             <inertial pos="0 0 0.02119" mass="0.010"
                       diaginertia="0.000002 0.000002 0.0000003"/>
@@ -263,7 +263,7 @@
       <!-- ============================================================ -->
       <!--                      环指 (Ring)                              -->
       <!-- ============================================================ -->
-      <body name="ring_base" pos="-0.009 0 0.072" euler="-0.0944 0 0">
+      <body name="ring_base" pos="0.009 0 0.074" euler="-0.0944 0 0">
         <inertial pos="0 0 0" mass="0.002" 
                   diaginertia="0.0000001 0.0000001 0.0000001"/>
         <joint name="ring_q1" class="finger_joint" type="hinge"
@@ -272,7 +272,7 @@
           <inertial pos="0 0 0" mass="0.002" 
                     diaginertia="0.0000001 0.0000001 0.0000001"/>
           <joint name="ring_q2" class="finger_joint" type="hinge"
-                 axis="0 1 0" range="-0.7854 0.7854" ref="0"/>
+                 axis="0 1 0" range="-0.35 0.35" ref="0"/>
           <body name="ring_link_PM" pos="0 0 0">
             <inertial pos="0 0 0.02119" mass="0.010"
                       diaginertia="0.000002 0.000002 0.0000003"/>
@@ -305,7 +305,7 @@
       <!-- ============================================================ -->
       <!--                      小指 (Little)                            -->
       <!-- ============================================================ -->
-      <body name="little_base" pos="-0.027 0 0.068" euler="-0.0944 0 0">
+      <body name="little_base" pos="0.027 0 0.072" euler="-0.0944 0 0">
         <inertial pos="0 0 0" mass="0.002" 
                   diaginertia="0.0000001 0.0000001 0.0000001"/>
         <joint name="little_q1" class="finger_joint" type="hinge"
@@ -314,7 +314,7 @@
           <inertial pos="0 0 0" mass="0.002" 
                     diaginertia="0.0000001 0.0000001 0.0000001"/>
           <joint name="little_q2" class="finger_joint" type="hinge"
-                 axis="0 1 0" range="-0.7854 0.7854" ref="0"/>
+                 axis="0 1 0" range="-0.35 0.35" ref="0"/>
           <body name="little_link_PM" pos="0 0 0">
             <inertial pos="0 0 0.02119" mass="0.010"
                       diaginertia="0.000002 0.000002 0.0000003"/>
@@ -396,22 +396,22 @@
     
     <!-- 食指驱动 (q1, q2 由并联机构映射; q3 直接驱动; q4 由耦合约束) -->
     <position name="index_act_q1" joint="index_q1" kp="2.0" ctrlrange="-1.571 0.262"/>
-    <position name="index_act_q2" joint="index_q2" kp="1.5" ctrlrange="-0.785 0.785"/>
+    <position name="index_act_q2" joint="index_q2" kp="1.5" ctrlrange="-0.35 0.35"/>
     <position name="index_act_q3" joint="index_q3" kp="1.5" ctrlrange="-1.571 0.262"/>
     
     <!-- 中指驱动 -->
     <position name="middle_act_q1" joint="middle_q1" kp="2.0" ctrlrange="-1.571 0.262"/>
-    <position name="middle_act_q2" joint="middle_q2" kp="1.5" ctrlrange="-0.785 0.785"/>
+    <position name="middle_act_q2" joint="middle_q2" kp="1.5" ctrlrange="-0.35 0.35"/>
     <position name="middle_act_q3" joint="middle_q3" kp="1.5" ctrlrange="-1.571 0.262"/>
     
     <!-- 环指驱动 -->
     <position name="ring_act_q1" joint="ring_q1" kp="2.0" ctrlrange="-1.571 0.262"/>
-    <position name="ring_act_q2" joint="ring_q2" kp="1.5" ctrlrange="-0.785 0.785"/>
+    <position name="ring_act_q2" joint="ring_q2" kp="1.5" ctrlrange="-0.35 0.35"/>
     <position name="ring_act_q3" joint="ring_q3" kp="1.5" ctrlrange="-1.571 0.262"/>
     
     <!-- 小指驱动 -->
     <position name="little_act_q1" joint="little_q1" kp="2.0" ctrlrange="-1.571 0.262"/>
-    <position name="little_act_q2" joint="little_q2" kp="1.5" ctrlrange="-0.785 0.785"/>
+    <position name="little_act_q2" joint="little_q2" kp="1.5" ctrlrange="-0.35 0.35"/>
     <position name="little_act_q3" joint="little_q3" kp="1.5" ctrlrange="-1.571 0.262"/>
   </actuator>
   

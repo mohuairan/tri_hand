@@ -2,14 +2,17 @@
   Jack Hand 三指版 MuJoCo MJCF 模型 (拇指 + 食指 + 中指)
 
   基于五指版 jack_hand.xml 精简，移除环指和小指，缩窄手掌
+  增加手腕 6-DOF、掌心相机、指尖触觉传感器、抓取目标物体
+  手掌绕 X 轴旋转 -90° (Rx(-π/2))，掌心朝下，手指朝前(+Y)伸出
+  弯曲手指时指尖从前方向下扫过，实现从上方包裹抓取
 
   结构说明:
+    - 手腕: 6-DOF (xyz 平移 + rxryrz 旋转), 基座高度 z=0.45
+    - 手掌: 绕 X 轴旋转 -90°，掌心朝 -Z (向下)，手指朝 +Y (向前)
     - 拇指: 4-DOF 串联机构 (q1_Rx -> q2_Rz -> Ry_alpha1 -> q3 -> q4)
     - 食指/中指: 等效串联模型 3-DOF + 耦合 q4
-      - MCP: q1(屈伸) + q2(外展)
-      - PIP: q3
-      - DIP: q4 (耦合到 q3)
-      - 串联链: PM(42.39mm) -> MN(30mm) -> NT(24.16mm)
+    - 掌心相机: palm_cam (翻转后朝下方)
+    - 触觉传感器: thumb/index/middle_touch (法向力)
 
   单位: 长度 m, 角度 rad
 -->
@@ -63,12 +66,25 @@
     <light pos="0.3 0.3 0.5" dir="-0.3 -0.3 -0.5" diffuse="0.8 0.8 0.8"/>
     <light pos="-0.3 0.3 0.5" dir="0.3 -0.3 -0.5" diffuse="0.4 0.4 0.4"/>
 
-    <!-- ==================== 支撑架 ==================== -->
-    <geom name="stand_base" type="box" size="0.1 0.1 0.01" pos="0 0 0.01" rgba="0.3 0.3 0.3 1"/>
-    <geom name="stand_pole" type="cylinder" size="0.015 0.1" pos="0 0 0.1" rgba="0.2 0.2 0.2 1"/>
+    <!-- ==================== 手腕 6-DOF ==================== -->
+    <body name="wrist_base" pos="0 0 0.45">
+      <inertial pos="0 0 0" mass="0.05"
+                diaginertia="0.00001 0.00001 0.00001"/>
+      <joint name="wrist_x" type="slide" axis="1 0 0" range="-0.15 0.15"
+             damping="2" limited="true"/>
+      <joint name="wrist_y" type="slide" axis="0 1 0" range="-0.15 0.15"
+             damping="2" limited="true"/>
+      <joint name="wrist_z" type="slide" axis="0 0 1" range="-0.15 0.15"
+             damping="2" limited="true"/>
+      <joint name="wrist_rx" type="hinge" axis="1 0 0" range="-1.5708 1.5708"
+             damping="0.5" limited="true"/>
+      <joint name="wrist_ry" type="hinge" axis="0 1 0" range="-1.5708 1.5708"
+             damping="0.5" limited="true"/>
+      <joint name="wrist_rz" type="hinge" axis="0 0 1" range="-1.5708 1.5708"
+             damping="0.5" limited="true"/>
 
-    <!-- ==================== 手掌基座 (三指窄版) ==================== -->
-    <body name="palm" pos="0 0 0.2">
+    <!-- ==================== 手掌基座 (三指窄版, 绕X轴-90°掌心朝下) ==================== -->
+    <body name="palm" pos="0 0 0" euler="-1.5708 0 0">
       <inertial pos="0 0 0" mass="0.10"
                 diaginertia="0.00003 0.00005 0.00002"/>
       <!-- 手掌几何体 (缩窄) -->
@@ -76,6 +92,10 @@
             pos="0 0 0.02" rgba="0.65 0.62 0.58 1"/>
       <geom name="palm_top" type="box" size="0.018 0.010 0.008"
             pos="0 0 0.065" rgba="0.65 0.62 0.58 1"/>
+
+      <!-- 掌心相机：掌心朝下，相机朝 -Y_local (= -Z_world 向下) -->
+      <camera name="palm_cam" pos="0 0.015 0.04" euler="0 0 0"
+              fovy="60"/>
 
       <!-- ============================================================ -->
       <!--                    拇指 (Thumb) - 4 DOF                      -->
@@ -215,6 +235,25 @@
       </body>
 
     </body><!-- end palm -->
+    </body><!-- end wrist_base -->
+
+    <!-- ==================== 物体放置台 (紧凑圆台,不阻挡抓取路径) ==================== -->
+    <geom name="table_top" type="cylinder" size="0.025 0.005"
+          pos="-0.02 0.08 0.245" rgba="0.45 0.45 0.5 1"
+          friction="1.0 0.005 0.001"/>
+    <geom name="table_leg" type="cylinder" size="0.006 0.12"
+          pos="-0.02 0.08 0.12" rgba="0.35 0.35 0.4 1"/>
+
+    <!-- ==================== 抓取目标物体 ==================== -->
+    <body name="target_object" pos="-0.02 0.08 0.265">
+      <freejoint name="obj_free"/>
+      <inertial pos="0 0 0" mass="0.05"
+                diaginertia="0.000005 0.000005 0.000005"/>
+      <geom name="obj_geom" type="sphere" size="0.02" mass="0.05"
+            rgba="0.9 0.2 0.2 1" friction="1.0 0.005 0.001"
+            condim="4"/>
+    </body>
+
   </worldbody>
 
   <!-- ==================== 等式约束 ==================== -->
@@ -228,29 +267,52 @@
 
   <!-- ==================== 驱动器 ==================== -->
   <actuator>
+    <!-- 手腕驱动 (6-DOF) -->
+    <position name="wrist_act_x" joint="wrist_x" kp="2000" ctrlrange="-0.15 0.15"/>
+    <position name="wrist_act_y" joint="wrist_y" kp="2000" ctrlrange="-0.15 0.15"/>
+    <position name="wrist_act_z" joint="wrist_z" kp="2000" ctrlrange="-0.15 0.15"/>
+    <position name="wrist_act_rx" joint="wrist_rx" kp="200" ctrlrange="-1.5708 1.5708"/>
+    <position name="wrist_act_ry" joint="wrist_ry" kp="200" ctrlrange="-1.5708 1.5708"/>
+    <position name="wrist_act_rz" joint="wrist_rz" kp="200" ctrlrange="-1.5708 1.5708"/>
+
     <!-- 拇指驱动 -->
-    <position name="thumb_act_q1" joint="thumb_q1" kp="2.0" ctrlrange="-1.658 0"/>
-    <position name="thumb_act_q2" joint="thumb_q2" kp="2.0" ctrlrange="-0.960 0"/>
-    <position name="thumb_act_q3" joint="thumb_q3" kp="1.5" ctrlrange="-1.501 0"/>
-    <position name="thumb_act_q4" joint="thumb_q4" kp="1.0" ctrlrange="-1.222 0"/>
+    <position name="thumb_act_q1" joint="thumb_q1" kp="5.0" ctrlrange="-1.658 0"/>
+    <position name="thumb_act_q2" joint="thumb_q2" kp="5.0" ctrlrange="-0.960 0"/>
+    <position name="thumb_act_q3" joint="thumb_q3" kp="4.0" ctrlrange="-1.501 0"/>
+    <position name="thumb_act_q4" joint="thumb_q4" kp="3.0" ctrlrange="-1.222 0"/>
 
     <!-- 食指驱动 -->
-    <position name="index_act_q1" joint="index_q1" kp="2.0" ctrlrange="-1.571 0.262"/>
-    <position name="index_act_q2" joint="index_q2" kp="1.5" ctrlrange="-0.35 0.35"/>
-    <position name="index_act_q3" joint="index_q3" kp="1.5" ctrlrange="-1.571 0.262"/>
+    <position name="index_act_q1" joint="index_q1" kp="5.0" ctrlrange="-1.571 0.262"/>
+    <position name="index_act_q2" joint="index_q2" kp="4.0" ctrlrange="-0.35 0.35"/>
+    <position name="index_act_q3" joint="index_q3" kp="4.0" ctrlrange="-1.571 0.262"/>
 
     <!-- 中指驱动 -->
-    <position name="middle_act_q1" joint="middle_q1" kp="2.0" ctrlrange="-1.571 0.262"/>
-    <position name="middle_act_q2" joint="middle_q2" kp="1.5" ctrlrange="-0.35 0.35"/>
-    <position name="middle_act_q3" joint="middle_q3" kp="1.5" ctrlrange="-1.571 0.262"/>
+    <position name="middle_act_q1" joint="middle_q1" kp="5.0" ctrlrange="-1.571 0.262"/>
+    <position name="middle_act_q2" joint="middle_q2" kp="4.0" ctrlrange="-0.35 0.35"/>
+    <position name="middle_act_q3" joint="middle_q3" kp="4.0" ctrlrange="-1.571 0.262"/>
   </actuator>
 
   <!-- ==================== 传感器 ==================== -->
   <sensor>
+    <!-- 指尖位置 -->
     <framepos name="thumb_tip_pos" objtype="site" objname="thumb_tip_site"/>
     <framepos name="index_tip_pos" objtype="site" objname="index_tip_site"/>
     <framepos name="middle_tip_pos" objtype="site" objname="middle_tip_site"/>
 
+    <!-- 指尖触觉 (法向力标量) -->
+    <touch name="thumb_touch" site="thumb_tip_site"/>
+    <touch name="index_touch" site="index_tip_site"/>
+    <touch name="middle_touch" site="middle_tip_site"/>
+
+    <!-- 手腕关节 -->
+    <jointpos name="wrist_x_pos" joint="wrist_x"/>
+    <jointpos name="wrist_y_pos" joint="wrist_y"/>
+    <jointpos name="wrist_z_pos" joint="wrist_z"/>
+    <jointpos name="wrist_rx_pos" joint="wrist_rx"/>
+    <jointpos name="wrist_ry_pos" joint="wrist_ry"/>
+    <jointpos name="wrist_rz_pos" joint="wrist_rz"/>
+
+    <!-- 手指关节 -->
     <jointpos name="thumb_q1_pos" joint="thumb_q1"/>
     <jointpos name="thumb_q2_pos" joint="thumb_q2"/>
     <jointpos name="thumb_q3_pos" joint="thumb_q3"/>

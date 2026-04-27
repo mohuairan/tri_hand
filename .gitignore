@@ -207,3 +207,11 @@ codegen/
 # Octave session info
 octave-workspace
 
+# Local training artifacts
+jk_fkik/three_finger/grasp/checkpoints_*/
+jk_fkik/three_finger/grasp/jk_fkik/
+
+# Local SSH scratch files
+tempkey
+tempkey.pub
+

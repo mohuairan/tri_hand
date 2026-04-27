@@ -1,0 +1,44 @@
+<!--
+  基础抓取目标物体模板
+
+  每个物体定义为独立的 <body>，带 freejoint。
+  在 Python 中通过修改 jack_hand_3f.xml 的 target_object 几何体来切换物体类型，
+  或通过 mujoco.MjModel.from_xml_string() 动态替换。
+
+  物体尺寸范围：适合三指手抓取 (直径/边长 20-35mm)
+  单位：长度 m, 角度 rad
+-->
+
+<!-- ====== 球体 (默认) ====== -->
+<!-- size="0.015" = r=15mm, 直径30mm -->
+<!--
+<geom name="obj_geom" type="sphere" size="0.015" mass="0.05"
+      rgba="0.9 0.2 0.2 1" friction="1.0 0.005 0.001" condim="4"/>
+-->
+
+<!-- ====== 小球 ====== -->
+<!--
+<geom name="obj_geom" type="sphere" size="0.012" mass="0.03"
+      rgba="0.2 0.8 0.2 1" friction="1.0 0.005 0.001" condim="4"/>
+-->
+
+<!-- ====== 圆柱 ====== -->
+<!-- size="0.01 0.015" = r=10mm, 半高=15mm (总高30mm) -->
+<!--
+<geom name="obj_geom" type="cylinder" size="0.01 0.015" mass="0.05"
+      rgba="0.2 0.5 0.9 1" friction="1.0 0.005 0.001" condim="4"/>
+-->
+
+<!-- ====== 方块 ====== -->
+<!-- size="0.012 0.012 0.012" = 半边长12mm (总24×24×24mm) -->
+<!--
+<geom name="obj_geom" type="box" size="0.012 0.012 0.012" mass="0.05"
+      rgba="0.9 0.7 0.1 1" friction="1.0 0.005 0.001" condim="4"/>
+-->
+
+<!-- ====== 椭球 (用 mesh 或 ellipsoid 近似，MuJoCo 用 capsule 近似) ====== -->
+<!-- size="0.008 0.02" = r=8mm, 半长=20mm (总40×16×16mm) -->
+<!--
+<geom name="obj_geom" type="capsule" size="0.008 0.012" mass="0.04"
+      rgba="0.8 0.3 0.8 1" friction="1.0 0.005 0.001" condim="4"/>
+-->

@@ -1,0 +1,274 @@
+<!--
+  Jack Hand 三指版 - 纯机器人模型 (拇指 + 食指 + 中指)
+
+  手掌绕 X 轴旋转 -90° (Rx(-pi/2))，掌心朝下，手指朝前(+Y)伸出
+  弯曲手指时指尖从前方向下扫过，实现从上方包裹抓取
+
+  结构:
+    - 手腕: 6-DOF (xyz 平移 + rxryrz 旋转), 基座高度 z=0.45
+    - 手掌: 绕 X 轴旋转 -90 deg，掌心朝 -Z (向下)，手指朝 +Y (向前)
+    - 拇指: 4-DOF 串联机构 (q1_Rx -> q2_Rz -> Ry_alpha1 -> q3 -> q4)
+    - 食指/中指: 等效串联模型 3-DOF + 耦合 q4
+    - 掌心相机: palm_cam
+    - 触觉传感器: thumb/index/middle_touch (法向力)
+
+  单位: 长度 m, 角度 rad
+  本文件仅包含机器人本体，场景信息见 scene.xml
+-->
+<mujoco model="jodell_jack_hand_3f_robot">
+
+  <!-- ==================== 默认参数 ==================== -->
+  <default>
+    <joint damping="0.01" armature="0.001"/>
+    <geom rgba="0.8 0.75 0.65 1" friction="1.0 0.005 0.001"/>
+
+    <default class="finger_link">
+      <geom type="capsule" rgba="0.7 0.7 0.72 1" size="0.003"/>
+    </default>
+
+    <default class="thumb_link">
+      <geom type="capsule" rgba="0.75 0.72 0.68 1" size="0.0035"/>
+    </default>
+
+    <default class="finger_joint">
+      <joint damping="0.005" armature="0.0005" limited="true"/>
+    </default>
+
+    <default class="thumb_joint">
+      <joint damping="0.008" armature="0.0008" limited="true"/>
+    </default>
+
+    <default class="fingertip">
+      <geom type="sphere" size="0.004" rgba="0.9 0.85 0.8 1"
+            friction="2.0 0.01 0.005" condim="4"/>
+    </default>
+  </default>
+
+  <!-- ==================== 世界体 (手腕 + 手掌 + 手指) ==================== -->
+  <worldbody>
+    <body name="wrist_base" pos="0 0 0.45">
+      <inertial pos="0 0 0" mass="0.05"
+                diaginertia="0.00001 0.00001 0.00001"/>
+      <joint name="wrist_x" type="slide" axis="1 0 0" range="-0.15 0.15"
+             damping="2" limited="true"/>
+      <joint name="wrist_y" type="slide" axis="0 1 0" range="-0.15 0.15"
+             damping="2" limited="true"/>
+      <joint name="wrist_z" type="slide" axis="0 0 1" range="-0.15 0.15"
+             damping="2" limited="true"/>
+      <joint name="wrist_rx" type="hinge" axis="1 0 0" range="-1.5708 1.5708"
+             damping="0.5" limited="true"/>
+      <joint name="wrist_ry" type="hinge" axis="0 1 0" range="-1.5708 1.5708"
+             damping="0.5" limited="true"/>
+      <joint name="wrist_rz" type="hinge" axis="0 0 1" range="-1.5708 1.5708"
+             damping="0.5" limited="true"/>
+
+      <!-- 手掌基座 (三指窄版, 绕X轴-90 deg 掌心朝下) -->
+      <body name="palm" pos="0 0 0" euler="-1.5708 0 0">
+        <inertial pos="0 0 0" mass="0.10"
+                  diaginertia="0.00003 0.00005 0.00002"/>
+        <geom name="palm_body" type="box" size="0.02 0.012 0.04"
+              pos="0 0 0.02" rgba="0.65 0.62 0.58 1"/>
+        <geom name="palm_top" type="box" size="0.018 0.010 0.008"
+              pos="0 0 0.065" rgba="0.65 0.62 0.58 1"/>
+
+        <!-- 掌心相机 -->
+        <camera name="palm_cam" pos="0 0.015 0.04" euler="0 0 0" fovy="60"/>
+
+        <!-- ==================== 拇指 (Thumb) - 4 DOF ==================== -->
+        <body name="thumb_base" pos="-0.026 0.005 0.005"
+              euler="0 -1.5708 0">
+          <inertial pos="0 0 0" mass="0.002"
+                    diaginertia="0.0000001 0.0000001 0.0000001"/>
+          <joint name="thumb_q1" class="thumb_joint" type="hinge"
+                 axis="1 0 0" range="-1.6580 0" ref="0"/>
+
+          <body name="thumb_q2_frame" pos="0 0 0" euler="0 0 3.14159265">
+            <inertial pos="0 0 0" mass="0.002"
+                      diaginertia="0.0000001 0.0000001 0.0000001"/>
+            <joint name="thumb_q2" class="thumb_joint" type="hinge"
+                   axis="0 0 1" range="-0.9599 0" ref="0"/>
+
+            <body name="thumb_link_OM" pos="0 0 0" euler="0 -0.0637 0">
+              <inertial pos="0 0 0.01178" mass="0.008"
+                        diaginertia="0.000001 0.000001 0.0000002"/>
+              <geom name="thumb_OM" class="thumb_link"
+                    fromto="0 0 0  0 0 0.02356"/>
+
+              <body name="thumb_link_MN" pos="0 0 0.02356">
+                <joint name="thumb_q3" class="thumb_joint" type="hinge"
+                       axis="0 1 0" range="-1.5010 0" ref="-0.1434"/>
+                <inertial pos="0 0 0.02658" mass="0.012"
+                          diaginertia="0.000003 0.000003 0.0000003"/>
+                <geom name="thumb_MN" class="thumb_link"
+                      fromto="0 0 0  0 0 0.05317"/>
+
+                <body name="thumb_link_NT" pos="0 0 0.05317">
+                  <joint name="thumb_q4" class="thumb_joint" type="hinge"
+                         axis="0 1 0" range="-1.2217 0" ref="0.2919"/>
+                  <inertial pos="0 0 0.01278" mass="0.006"
+                            diaginertia="0.0000008 0.0000008 0.0000001"/>
+                  <geom name="thumb_NT" class="thumb_link"
+                        fromto="0 0 0  0 0 0.02557"/>
+
+                  <body name="thumb_tip" pos="0 0 0.02557">
+                    <geom name="thumb_tip_geom" class="fingertip"/>
+                    <site name="thumb_tip_site" pos="0 0 0" size="0.002"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- ==================== 食指 (Index) - 3 DOF + 耦合 ==================== -->
+        <body name="index_base" pos="-0.018 0 0.068" euler="-0.0944 0 0">
+          <inertial pos="0 0 0" mass="0.002"
+                    diaginertia="0.0000001 0.0000001 0.0000001"/>
+          <joint name="index_q1" class="finger_joint" type="hinge"
+                 axis="1 0 0" range="-1.5708 0.2618" ref="0"/>
+
+          <body name="index_q2_frame" pos="0 0 0">
+            <inertial pos="0 0 0" mass="0.002"
+                      diaginertia="0.0000001 0.0000001 0.0000001"/>
+            <joint name="index_q2" class="finger_joint" type="hinge"
+                   axis="0 1 0" range="-0.35 0.35" ref="0"/>
+
+            <body name="index_link_PM" pos="0 0 0">
+              <inertial pos="0 0 0.02119" mass="0.010"
+                        diaginertia="0.000002 0.000002 0.0000003"/>
+              <geom name="index_PM" class="finger_link"
+                    fromto="0 0 0  0 0 0.04239"/>
+
+              <body name="index_link_MN" pos="0 0 0.04239">
+                <joint name="index_q3" class="finger_joint" type="hinge"
+                       axis="1 0 0" range="-1.5708 0.2618" ref="0"/>
+                <inertial pos="0 0 0.015" mass="0.006"
+                          diaginertia="0.0000008 0.0000008 0.0000001"/>
+                <geom name="index_MN" class="finger_link"
+                      fromto="0 0 0  0 0 0.03"/>
+
+                <body name="index_link_NT" pos="0 0 0.03">
+                  <joint name="index_q4" class="finger_joint" type="hinge"
+                         axis="1 0 0" range="-1.5708 0.2618" ref="0"/>
+                  <inertial pos="0 0 0.01208" mass="0.004"
+                            diaginertia="0.0000004 0.0000004 0.00000005"/>
+                  <geom name="index_NT" class="finger_link"
+                        fromto="0 0 0  0 0 0.02416"/>
+
+                  <body name="index_tip" pos="0 0 0.02416">
+                    <geom name="index_tip_geom" class="fingertip"/>
+                    <site name="index_tip_site" pos="0 0 0" size="0.002"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+
+        <!-- ==================== 中指 (Middle) ==================== -->
+        <body name="middle_base" pos="0.000 0 0.072" euler="-0.0944 0 0">
+          <inertial pos="0 0 0" mass="0.002"
+                    diaginertia="0.0000001 0.0000001 0.0000001"/>
+          <joint name="middle_q1" class="finger_joint" type="hinge"
+                 axis="1 0 0" range="-1.5708 0.2618" ref="0"/>
+          <body name="middle_q2_frame" pos="0 0 0">
+            <inertial pos="0 0 0" mass="0.002"
+                      diaginertia="0.0000001 0.0000001 0.0000001"/>
+            <joint name="middle_q2" class="finger_joint" type="hinge"
+                   axis="0 1 0" range="-0.35 0.35" ref="0"/>
+            <body name="middle_link_PM" pos="0 0 0">
+              <inertial pos="0 0 0.02119" mass="0.010"
+                        diaginertia="0.000002 0.000002 0.0000003"/>
+              <geom name="middle_PM" class="finger_link"
+                    fromto="0 0 0  0 0 0.04239"/>
+              <body name="middle_link_MN" pos="0 0 0.04239">
+                <joint name="middle_q3" class="finger_joint" type="hinge"
+                       axis="1 0 0" range="-1.5708 0.2618" ref="0"/>
+                <inertial pos="0 0 0.015" mass="0.006"
+                          diaginertia="0.0000008 0.0000008 0.0000001"/>
+                <geom name="middle_MN" class="finger_link"
+                      fromto="0 0 0  0 0 0.03"/>
+                <body name="middle_link_NT" pos="0 0 0.03">
+                  <joint name="middle_q4" class="finger_joint" type="hinge"
+                         axis="1 0 0" range="-1.5708 0.2618" ref="0"/>
+                  <inertial pos="0 0 0.01208" mass="0.004"
+                            diaginertia="0.0000004 0.0000004 0.00000005"/>
+                  <geom name="middle_NT" class="finger_link"
+                        fromto="0 0 0  0 0 0.02416"/>
+                  <body name="middle_tip" pos="0 0 0.02416">
+                    <geom name="middle_tip_geom" class="fingertip"/>
+                    <site name="middle_tip_site" pos="0 0 0" size="0.002"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+
+      </body><!-- end palm -->
+    </body><!-- end wrist_base -->
+  </worldbody>
+
+  <!-- ==================== 等式约束 ==================== -->
+  <equality>
+    <joint name="index_q3q4_coupling" joint1="index_q4" joint2="index_q3"
+           polycoef="-0.01462 1.27107 0.07658 0.05314 0.10674"/>
+    <joint name="middle_q3q4_coupling" joint1="middle_q4" joint2="middle_q3"
+           polycoef="-0.01462 1.27107 0.07658 0.05314 0.10674"/>
+  </equality>
+
+  <!-- ==================== 驱动器 ==================== -->
+  <actuator>
+    <position name="wrist_act_x" joint="wrist_x" kp="2000" ctrlrange="-0.15 0.15"/>
+    <position name="wrist_act_y" joint="wrist_y" kp="2000" ctrlrange="-0.15 0.15"/>
+    <position name="wrist_act_z" joint="wrist_z" kp="2000" ctrlrange="-0.15 0.15"/>
+    <position name="wrist_act_rx" joint="wrist_rx" kp="200" ctrlrange="-1.5708 1.5708"/>
+    <position name="wrist_act_ry" joint="wrist_ry" kp="200" ctrlrange="-1.5708 1.5708"/>
+    <position name="wrist_act_rz" joint="wrist_rz" kp="200" ctrlrange="-1.5708 1.5708"/>
+
+    <position name="thumb_act_q1" joint="thumb_q1" kp="5.0" ctrlrange="-1.658 0"/>
+    <position name="thumb_act_q2" joint="thumb_q2" kp="5.0" ctrlrange="-0.960 0"/>
+    <position name="thumb_act_q3" joint="thumb_q3" kp="4.0" ctrlrange="-1.501 0"/>
+    <position name="thumb_act_q4" joint="thumb_q4" kp="3.0" ctrlrange="-1.222 0"/>
+
+    <position name="index_act_q1" joint="index_q1" kp="5.0" ctrlrange="-1.571 0.262"/>
+    <position name="index_act_q2" joint="index_q2" kp="4.0" ctrlrange="-0.35 0.35"/>
+    <position name="index_act_q3" joint="index_q3" kp="4.0" ctrlrange="-1.571 0.262"/>
+
+    <position name="middle_act_q1" joint="middle_q1" kp="5.0" ctrlrange="-1.571 0.262"/>
+    <position name="middle_act_q2" joint="middle_q2" kp="4.0" ctrlrange="-0.35 0.35"/>
+    <position name="middle_act_q3" joint="middle_q3" kp="4.0" ctrlrange="-1.571 0.262"/>
+  </actuator>
+
+  <!-- ==================== 传感器 ==================== -->
+  <sensor>
+    <framepos name="thumb_tip_pos" objtype="site" objname="thumb_tip_site"/>
+    <framepos name="index_tip_pos" objtype="site" objname="index_tip_site"/>
+    <framepos name="middle_tip_pos" objtype="site" objname="middle_tip_site"/>
+
+    <touch name="thumb_touch" site="thumb_tip_site"/>
+    <touch name="index_touch" site="index_tip_site"/>
+    <touch name="middle_touch" site="middle_tip_site"/>
+
+    <jointpos name="wrist_x_pos" joint="wrist_x"/>
+    <jointpos name="wrist_y_pos" joint="wrist_y"/>
+    <jointpos name="wrist_z_pos" joint="wrist_z"/>
+    <jointpos name="wrist_rx_pos" joint="wrist_rx"/>
+    <jointpos name="wrist_ry_pos" joint="wrist_ry"/>
+    <jointpos name="wrist_rz_pos" joint="wrist_rz"/>
+
+    <jointpos name="thumb_q1_pos" joint="thumb_q1"/>
+    <jointpos name="thumb_q2_pos" joint="thumb_q2"/>
+    <jointpos name="thumb_q3_pos" joint="thumb_q3"/>
+    <jointpos name="thumb_q4_pos" joint="thumb_q4"/>
+    <jointpos name="index_q1_pos" joint="index_q1"/>
+    <jointpos name="index_q2_pos" joint="index_q2"/>
+    <jointpos name="index_q3_pos" joint="index_q3"/>
+    <jointpos name="index_q4_pos" joint="index_q4"/>
+    <jointpos name="middle_q1_pos" joint="middle_q1"/>
+    <jointpos name="middle_q2_pos" joint="middle_q2"/>
+    <jointpos name="middle_q3_pos" joint="middle_q3"/>
+    <jointpos name="middle_q4_pos" joint="middle_q4"/>
+  </sensor>
+
+</mujoco>

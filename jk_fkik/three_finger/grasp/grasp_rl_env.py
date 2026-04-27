@@ -43,6 +43,7 @@ class JackHandStateEnv(gym.Env):
             object_type=object_type,
             n_substeps=n_substeps,
             reward_type=reward_type,
+            include_camera_obs=False,
             randomize_object_radius=randomize_object_radius,
             object_radius_range=object_radius_range,
             randomize_object_friction=randomize_object_friction,
@@ -152,4 +153,3 @@ class JackHandStateEnv(gym.Env):
 
     def close(self):
         self.base_env.close()
-

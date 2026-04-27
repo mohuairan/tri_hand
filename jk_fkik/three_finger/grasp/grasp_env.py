@@ -71,6 +71,7 @@ class JackHandGraspEnv(gym.Env):
                  cam_width: int = 320, cam_height: int = 240,
                  n_substeps: int = 20,
                  reward_type: str = "dense",
+                 include_camera_obs: bool = True,
                  randomize_object_radius: bool = False,
                  object_radius_range: Tuple[float, float] = (0.016, 0.024),
                  randomize_object_friction: bool = False,
@@ -83,6 +84,7 @@ class JackHandGraspEnv(gym.Env):
         self.cam_height = cam_height
         self.n_substeps = n_substeps
         self.reward_type = reward_type
+        self.include_camera_obs = include_camera_obs
         self.randomize_object_radius = randomize_object_radius
         self.object_radius_range = object_radius_range
         self.randomize_object_friction = randomize_object_friction
@@ -237,7 +239,13 @@ class JackHandGraspEnv(gym.Env):
     # ===== Observation =====
 
     def _get_obs(self) -> Dict[str, np.ndarray]:
-        rgb, depth = self._render_palm_camera()
+        if self.include_camera_obs:
+            rgb, depth = self._render_palm_camera()
+        else:
+            rgb = np.zeros(
+                (self.cam_height, self.cam_width, 3), dtype=np.uint8)
+            depth = np.zeros(
+                (self.cam_height, self.cam_width), dtype=np.float32)
 
         joint_pos = np.zeros(16, dtype=np.float32)
         joint_vel = np.zeros(16, dtype=np.float32)

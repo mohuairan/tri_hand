@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import random
+import time
 from dataclasses import asdict, dataclass
 
 import numpy as np
@@ -13,6 +14,11 @@ import torch
 
 from grasp_rl_env import JackHandStateEnv
 from sac_agent import ReplayBuffer, SACAgent, SACConfig
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except Exception:  # pragma: no cover
+    SummaryWriter = None
 
 
 @dataclass
@@ -24,21 +30,31 @@ class TrainConfig:
     updates_per_step: int = 1
     eval_interval: int = 10_000
     eval_episodes: int = 10
+    object_type: str = "sphere"
     action_mode: str = "delta"
-    action_step: float = 0.12
+    wrist_translation_step: float = 0.015
+    finger_action_step: float = 0.06
+    lock_wrist_rotation: bool = True
     reward_type: str = "dense"
     n_substeps: int = 20
-    randomize_object_radius: bool = True
-    randomize_object_friction: bool = True
+    randomize_object_radius: bool = False
+    randomize_object_friction: bool = False
     save_dir: str = "jk_fkik/three_finger/grasp/checkpoints_sac"
     save_best_by: str = "success_rate"
+    render: bool = False
+    use_tensorboard: bool = True
+    tensorboard_logdir: str = "jk_fkik/three_finger/grasp/tb_runs"
+    run_name: str = ""
 
 
 def make_env(cfg: TrainConfig, render_mode=None):
     return JackHandStateEnv(
         render_mode=render_mode,
+        object_type=cfg.object_type,
         action_mode=cfg.action_mode,
-        action_step=cfg.action_step,
+        wrist_translation_step=cfg.wrist_translation_step,
+        finger_action_step=cfg.finger_action_step,
+        lock_wrist_rotation=cfg.lock_wrist_rotation,
         reward_type=cfg.reward_type,
         n_substeps=cfg.n_substeps,
         randomize_object_radius=cfg.randomize_object_radius,
@@ -61,6 +77,7 @@ def evaluate(agent: SACAgent, cfg: TrainConfig, seed_offset: int):
     height_gains = []
     contacts = []
     drifts = []
+    spin_rates = []
 
     for ep in range(cfg.eval_episodes):
         obs, _ = env.reset(seed=seed_offset + ep)
@@ -76,8 +93,9 @@ def evaluate(agent: SACAgent, cfg: TrainConfig, seed_offset: int):
         returns.append(total_reward)
         successes.append(float(last_info.get("is_success", False)))
         height_gains.append(float(last_info.get("height_gain", 0.0)))
-        contacts.append(float(last_info.get("n_contacts", 0)))
+        contacts.append(float(last_info.get("max_contacts", last_info.get("n_contacts", 0))))
         drifts.append(float(last_info.get("lateral_drift", 0.0)))
+        spin_rates.append(float(last_info.get("max_object_yaw_rate", last_info.get("object_yaw_rate", 0.0))))
 
     env.close()
     return {
@@ -87,6 +105,7 @@ def evaluate(agent: SACAgent, cfg: TrainConfig, seed_offset: int):
         "height_gain_mean": float(np.mean(height_gains)),
         "contacts_mean": float(np.mean(contacts)),
         "lateral_drift_mean": float(np.mean(drifts)),
+        "spin_rate_mean": float(np.mean(spin_rates)),
     }
 
 
@@ -98,9 +117,43 @@ def save_checkpoint(path: str, agent: SACAgent, train_cfg: TrainConfig, extra_st
     torch.save(ckpt, path)
 
 
+def make_run_name(cfg: TrainConfig) -> str:
+    if cfg.run_name:
+        return cfg.run_name
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    return f"sac_{cfg.object_type}_{cfg.action_mode}_{ts}"
+
+
+def create_summary_writer(cfg: TrainConfig):
+    if not cfg.use_tensorboard:
+        return None, None
+    if SummaryWriter is None:
+        print(
+            json.dumps(
+                {
+                    "iter_type": "warning",
+                    "message": "TensorBoard writer unavailable; install tensorboard to enable the dashboard.",
+                },
+                ensure_ascii=True,
+            )
+        )
+        return None, None
+    run_name = make_run_name(cfg)
+    log_dir = os.path.join(cfg.tensorboard_logdir, run_name)
+    writer = SummaryWriter(log_dir=log_dir)
+    return writer, log_dir
+
+
+def writer_add_scalar_dict(writer, prefix: str, stats: dict, step: int):
+    for key, value in stats.items():
+        if isinstance(value, (int, float, np.floating, np.integer, bool)):
+            writer.add_scalar(f"{prefix}/{key}", float(value), step)
+
+
 def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
     set_seed(train_cfg.seed)
-    env = make_env(train_cfg, render_mode=None)
+    train_render = "human" if train_cfg.render else None
+    env = make_env(train_cfg, render_mode=train_render)
 
     obs, _ = env.reset(seed=train_cfg.seed)
     obs_dim = env.observation_space.shape[0]
@@ -108,9 +161,16 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
 
     agent = SACAgent(obs_dim, act_dim, sac_cfg)
     replay = ReplayBuffer(obs_dim, act_dim, sac_cfg.replay_size)
+    writer, tb_log_dir = create_summary_writer(train_cfg)
 
     if sac_cfg.normalize_obs:
         agent.update_obs_norm(obs)
+
+    if writer is not None:
+        writer.add_text("config/train_cfg", json.dumps(asdict(train_cfg), ensure_ascii=True, indent=2))
+        writer.add_text("config/agent_cfg", json.dumps(asdict(sac_cfg), ensure_ascii=True, indent=2))
+        writer.add_text("run/info", f"log_dir={tb_log_dir}")
+        print(json.dumps({"iter_type": "tensorboard", "log_dir": tb_log_dir}, ensure_ascii=True))
 
     best_score = -float("inf")
     best_stats = {}
@@ -126,7 +186,10 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
             action = agent.act(obs, deterministic=False)
 
         next_obs, reward, terminated, truncated, info = env.step(action)
-        done = bool(terminated)
+        if train_cfg.render:
+            env.render()
+            time.sleep(0.04)
+        done = bool(terminated or truncated)
         replay.add(obs, action, reward, next_obs, float(done))
         if sac_cfg.normalize_obs:
             agent.update_obs_norm(obs, next_obs)
@@ -138,6 +201,8 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
         if step >= train_cfg.update_after and replay.size >= sac_cfg.batch_size:
             for _ in range(train_cfg.updates_per_step):
                 latest_update = agent.update(replay)
+            if writer is not None and latest_update and step % 50 == 0:
+                writer_add_scalar_dict(writer, "update", latest_update, step)
 
         if terminated or truncated:
             episode_idx += 1
@@ -150,6 +215,9 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
                 "is_success": bool(info.get("is_success", False)),
                 "height_gain": float(info.get("height_gain", 0.0)),
                 "lateral_drift": float(info.get("lateral_drift", 0.0)),
+                "max_object_yaw_rate": float(
+                    info.get("max_object_yaw_rate", info.get("object_yaw_rate", 0.0))
+                ),
             }
             if latest_update:
                 episode_stats.update({
@@ -158,6 +226,8 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
                     "alpha": latest_update["alpha"],
                 })
             print(json.dumps(episode_stats, ensure_ascii=True))
+            if writer is not None:
+                writer_add_scalar_dict(writer, "train_episode", episode_stats, step)
             obs, _ = env.reset(seed=train_cfg.seed + episode_idx)
             episode_return = 0.0
             episode_len = 0
@@ -182,6 +252,8 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
                     "logp_mean": latest_update["logp_mean"],
                 })
             print(json.dumps(stats, ensure_ascii=True))
+            if writer is not None:
+                writer_add_scalar_dict(writer, "eval", stats, step)
 
             latest_path = os.path.join(train_cfg.save_dir, "sac_latest.pt")
             save_checkpoint(latest_path, agent, train_cfg, stats)
@@ -194,6 +266,8 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
                 save_checkpoint(best_path, agent, train_cfg, stats)
 
     env.close()
+    if writer is not None:
+        writer.close()
     return best_stats
 
 
@@ -206,16 +280,40 @@ def parse_args():
     parser.add_argument("--updates-per-step", type=int, default=1)
     parser.add_argument("--eval-interval", type=int, default=10000)
     parser.add_argument("--eval-episodes", type=int, default=10)
+    parser.add_argument(
+        "--object-type",
+        type=str,
+        default="sphere",
+        choices=["sphere", "sphere_small", "cylinder", "box", "box_large"],
+    )
     parser.add_argument("--action-mode", type=str, default="delta", choices=["delta", "absolute"])
-    parser.add_argument("--action-step", type=float, default=0.12)
+    parser.add_argument("--wrist-translation-step", type=float, default=0.015)
+    parser.add_argument("--finger-action-step", type=float, default=0.06)
+    parser.add_argument("--lock-wrist-rotation", dest="lock_wrist_rotation", action="store_true")
+    parser.add_argument("--free-wrist-rotation", dest="lock_wrist_rotation", action="store_false")
     parser.add_argument("--reward-type", type=str, default="dense", choices=["dense", "sparse"])
     parser.add_argument("--n-substeps", type=int, default=20)
     parser.add_argument("--save-dir", type=str,
                         default="jk_fkik/three_finger/grasp/checkpoints_sac")
     parser.add_argument("--save-best-by", type=str, default="success_rate",
                         choices=["success_rate", "return_mean", "height_gain_mean"])
-    parser.add_argument("--no-radius-randomization", action="store_true")
-    parser.add_argument("--no-friction-randomization", action="store_true")
+    parser.add_argument("--radius-randomization", dest="radius_randomization",
+                        action="store_true")
+    parser.add_argument("--no-radius-randomization", dest="radius_randomization",
+                        action="store_false")
+    parser.add_argument("--friction-randomization", dest="friction_randomization",
+                        action="store_true")
+    parser.add_argument("--no-friction-randomization", dest="friction_randomization",
+                        action="store_false")
+    parser.add_argument("--render", action="store_true", help="Open MuJoCo viewer during training")
+    parser.add_argument("--tensorboard-logdir", type=str, default="jk_fkik/three_finger/grasp/tb_runs")
+    parser.add_argument("--run-name", type=str, default="")
+    parser.add_argument("--no-tensorboard", action="store_true")
+    parser.set_defaults(
+        radius_randomization=False,
+        friction_randomization=False,
+        lock_wrist_rotation=True,
+    )
 
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--hidden-dim", type=int, default=256)
@@ -227,9 +325,11 @@ def parse_args():
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--replay-size", type=int, default=500000)
-    parser.add_argument("--init-alpha", type=float, default=0.2)
+    parser.add_argument("--init-alpha", type=float, default=0.05)
     parser.add_argument("--target-entropy-scale", type=float, default=1.0)
-    parser.add_argument("--no-learnable-alpha", action="store_true")
+    parser.add_argument("--learnable-alpha", dest="learnable_alpha", action="store_true")
+    parser.add_argument("--fixed-alpha", dest="learnable_alpha", action="store_false")
+    parser.set_defaults(learnable_alpha=False)
     parser.add_argument("--no-obs-normalization", action="store_true")
     parser.add_argument("--obs-clip", type=float, default=10.0)
     return parser.parse_args()
@@ -245,14 +345,21 @@ def main():
         updates_per_step=args.updates_per_step,
         eval_interval=args.eval_interval,
         eval_episodes=args.eval_episodes,
+        object_type=args.object_type,
         action_mode=args.action_mode,
-        action_step=args.action_step,
+        wrist_translation_step=args.wrist_translation_step,
+        finger_action_step=args.finger_action_step,
+        lock_wrist_rotation=args.lock_wrist_rotation,
         reward_type=args.reward_type,
         n_substeps=args.n_substeps,
-        randomize_object_radius=not args.no_radius_randomization,
-        randomize_object_friction=not args.no_friction_randomization,
+        randomize_object_radius=args.radius_randomization,
+        randomize_object_friction=args.friction_randomization,
         save_dir=args.save_dir,
         save_best_by=args.save_best_by,
+        render=args.render,
+        use_tensorboard=not args.no_tensorboard,
+        tensorboard_logdir=args.tensorboard_logdir,
+        run_name=args.run_name,
     )
     sac_cfg = SACConfig(
         device=args.device,
@@ -265,7 +372,7 @@ def main():
         alpha_lr=args.alpha_lr,
         batch_size=args.batch_size,
         replay_size=args.replay_size,
-        learnable_alpha=not args.no_learnable_alpha,
+        learnable_alpha=args.learnable_alpha,
         init_alpha=args.init_alpha,
         target_entropy_scale=args.target_entropy_scale,
         normalize_obs=not args.no_obs_normalization,

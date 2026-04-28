@@ -254,8 +254,8 @@ class GraspPlanner:
                 spread_error += max(dot - target_dot, 0.0) ** 2
 
         palm_local = state['palm_mat'].T @ (center - state['palm_pos'])
-        palm_target = np.array([-0.012, 0.0, 0.060])
-        palm_weights = np.array([4.0, 1.0, 6.0])
+        palm_target = np.array([-0.015, 0.105, 0.075])
+        palm_weights = np.array([5.0, 4.0, 8.0])
         palm_error = np.sum(((palm_local - palm_target) * palm_weights) ** 2)
         if palm_local[2] < 0.015:
             palm_error += (0.015 - palm_local[2]) ** 2 * 25.0
@@ -282,7 +282,7 @@ class GraspPlanner:
             1.2 * normal_error +
             0.8 * enclosure_error +
             0.8 * spread_error +
-            0.12 * palm_error +
+            0.28 * palm_error +
             0.08 * reg_error
         )
 
@@ -354,7 +354,7 @@ class GraspPlanner:
             'index': np.array([x[10], x[11], x[12]]),
             'middle': np.array([x[13], x[14], x[15]]),
         }
-        finger_pregrasp = {name: angles * 0.35 for name, angles in finger_close.items()}
+        finger_pregrasp = {name: angles * 0.25 for name, angles in finger_close.items()}
 
         return {
             'wrist_target': wrist_target,

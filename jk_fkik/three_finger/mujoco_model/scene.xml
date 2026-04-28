@@ -31,18 +31,33 @@
     <light pos="-0.3 0.3 0.5" dir="0.3 -0.3 -0.5" diffuse="0.4 0.4 0.4"/>
 
     <!-- 物体放置台 -->
-    <geom name="table_top" type="cylinder" size="0.025 0.005"
+    <geom name="table_top" type="box" size="0.08 0.08 0.006"
+          pos="-0.02 0.08 0.244" rgba="0.45 0.45 0.5 1"
+          friction="1.0 0.005 0.001"/>
+    <geom name="table_top_visual" type="cylinder" size="0.08 0.005"
           pos="-0.02 0.08 0.245" rgba="0.45 0.45 0.5 1"
+          contype="0" conaffinity="0"/>
+    <geom name="tray_wall_px" type="box" size="0.004 0.070 0.006"
+          pos="0.054 0.08 0.256" rgba="0.55 0.55 0.60 0.9"
+          friction="1.0 0.005 0.001"/>
+    <geom name="tray_wall_nx" type="box" size="0.004 0.070 0.006"
+          pos="-0.094 0.08 0.256" rgba="0.55 0.55 0.60 0.9"
+          friction="1.0 0.005 0.001"/>
+    <geom name="tray_wall_py" type="box" size="0.070 0.004 0.006"
+          pos="-0.02 0.154 0.256" rgba="0.55 0.55 0.60 0.9"
+          friction="1.0 0.005 0.001"/>
+    <geom name="tray_wall_ny" type="box" size="0.070 0.004 0.006"
+          pos="-0.02 0.006 0.256" rgba="0.55 0.55 0.60 0.9"
           friction="1.0 0.005 0.001"/>
     <geom name="table_leg" type="cylinder" size="0.006 0.12"
           pos="-0.02 0.08 0.12" rgba="0.35 0.35 0.4 1"/>
 
     <!-- 抓取目标物体 -->
-    <body name="target_object" pos="-0.02 0.08 0.265">
+    <body name="target_object" pos="-0.02 0.08 0.278">
       <freejoint name="obj_free"/>
       <inertial pos="0 0 0" mass="0.05"
                 diaginertia="0.000005 0.000005 0.000005"/>
-      <geom name="obj_geom" type="sphere" size="0.02" mass="0.05"
+      <geom name="obj_geom" type="sphere" size="0.025" mass="0.05"
             rgba="0.9 0.2 0.2 1" friction="1.0 0.005 0.001"
             condim="4"/>
     </body>

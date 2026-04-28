@@ -34,8 +34,8 @@ class SACConfig:
     alpha_lr: float = 3e-4
     batch_size: int = 256
     replay_size: int = 500_000
-    learnable_alpha: bool = True
-    init_alpha: float = 0.2
+    learnable_alpha: bool = False
+    init_alpha: float = 0.05
     target_entropy_scale: float = 1.0
     normalize_obs: bool = True
     obs_clip: float = 10.0

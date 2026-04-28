@@ -34,9 +34,7 @@
     <geom name="table_top" type="box" size="0.08 0.08 0.006"
           pos="-0.02 0.08 0.244" rgba="0.45 0.45 0.5 1"
           friction="1.0 0.005 0.001"/>
-    <geom name="table_top_visual" type="cylinder" size="0.08 0.005"
-          pos="-0.02 0.08 0.245" rgba="0.45 0.45 0.5 1"
-          contype="0" conaffinity="0"/>
+
     <geom name="tray_wall_px" type="box" size="0.004 0.070 0.006"
           pos="0.054 0.08 0.256" rgba="0.55 0.55 0.60 0.9"
           friction="1.0 0.005 0.001"/>

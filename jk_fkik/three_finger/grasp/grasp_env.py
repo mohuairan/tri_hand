@@ -136,6 +136,10 @@ _FIXED_PREGRASP = {
     "middle": np.radians(np.array([-24.0, -3.5, -17.0], dtype=np.float64)),
 }
 _Q3Q4_POLY = np.array([-0.01462, 1.27107, 0.07658, 0.05314, 0.10674], dtype=np.float64)
+_SUCCESS_HEIGHT = 0.02
+_SUCCESS_STABLE_STEPS = 6
+_SUCCESS_MAX_DRIFT = 0.04
+_SUCCESS_HOLD_REQUIRED = 20
 
 
 class JackHandGraspEnv(gym.Env):
@@ -202,12 +206,17 @@ class JackHandGraspEnv(gym.Env):
         self._ever_thumb_front_support = False
         self._ever_tip_contact = False
         self._ever_link_contact = False
+        self._success_latched = False
+        self._success_hold_steps = 0
+        self._max_success_hold_steps = 0
         self._prev_tip_mean = 0.0
         self._prev_palm_err = 0.0
         self._prev_contact_score = 0.0
         self._prev_support_contacts = 0
         self._prev_enclosure_steps = 0
         self._prev_opposition_active = False
+        self._prev_success_latched = False
+        self._prev_success_hold_steps = 0
         self._prev_obj_yaw = 0.0
 
     def _cache_ids(self):
@@ -369,6 +378,9 @@ class JackHandGraspEnv(gym.Env):
         self._ever_thumb_front_support = False
         self._ever_tip_contact = False
         self._ever_link_contact = False
+        self._success_latched = False
+        self._success_hold_steps = 0
+        self._max_success_hold_steps = 0
 
         obs = self._get_obs()
         metrics = self._compute_step_metrics(obs)
@@ -382,6 +394,8 @@ class JackHandGraspEnv(gym.Env):
         self._prev_support_contacts = int(metrics["n_support_contacts"])
         self._prev_enclosure_steps = int(metrics["stable_enclosure_steps"])
         self._prev_opposition_active = bool(metrics["thumb_support"] and metrics["front_support"])
+        self._prev_success_latched = bool(metrics["success_latched"])
+        self._prev_success_hold_steps = int(metrics["success_hold_steps"])
         self._prev_obj_yaw = float(metrics["object_yaw"])
         info = self._get_info(obs, metrics)
         info["reset_action"] = self.get_reset_action()
@@ -420,6 +434,8 @@ class JackHandGraspEnv(gym.Env):
         self._prev_support_contacts = int(metrics["n_support_contacts"])
         self._prev_enclosure_steps = int(metrics["stable_enclosure_steps"])
         self._prev_opposition_active = bool(metrics["thumb_support"] and metrics["front_support"])
+        self._prev_success_latched = bool(metrics["success_latched"])
+        self._prev_success_hold_steps = int(metrics["success_hold_steps"])
         self._prev_obj_yaw = float(metrics["object_yaw"])
         return obs, reward, terminated, truncated, info
 
@@ -815,6 +831,27 @@ class JackHandGraspEnv(gym.Env):
         self._ever_tip_contact |= metrics["n_tip_contacts"] > 0
         self._ever_link_contact |= metrics["n_link_contacts"] > 0
 
+        success_candidate = bool(
+            metrics["height_gain"] > _SUCCESS_HEIGHT
+            and self._stable_enclosure_steps >= _SUCCESS_STABLE_STEPS
+            and metrics["lateral_drift"] < _SUCCESS_MAX_DRIFT
+            and metrics["thumb_support"]
+            and metrics["front_support"]
+        )
+        if success_candidate:
+            if not self._success_latched:
+                self._success_latched = True
+                self._success_hold_steps = 1
+            else:
+                self._success_hold_steps += 1
+        else:
+            self._success_latched = False
+            self._success_hold_steps = 0
+
+        self._max_success_hold_steps = max(
+            self._max_success_hold_steps, self._success_hold_steps
+        )
+
         metrics["stable_enclosure_steps"] = self._stable_enclosure_steps
         metrics["max_stable_enclosure_steps"] = self._max_stable_enclosure_steps
         metrics["max_support_contacts"] = self._max_support_contacts
@@ -823,12 +860,12 @@ class JackHandGraspEnv(gym.Env):
         metrics["ever_thumb_front_support"] = self._ever_thumb_front_support
         metrics["ever_tip_contact"] = self._ever_tip_contact
         metrics["ever_link_contact"] = self._ever_link_contact
+        metrics["success_candidate"] = success_candidate
+        metrics["success_latched"] = self._success_latched
+        metrics["success_hold_steps"] = self._success_hold_steps
+        metrics["max_success_hold_steps"] = self._max_success_hold_steps
         metrics["is_success"] = bool(
-            self._max_height_gain > 0.02
-            and self._max_stable_enclosure_steps >= 6
-            and metrics["lateral_drift"] < 0.04
-            and metrics["thumb_support"]
-            and metrics["front_support"]
+            self._success_latched and self._success_hold_steps >= _SUCCESS_HOLD_REQUIRED
         )
 
     def _compute_reward(self, obs: Dict[str, np.ndarray], metrics: Dict[str, Any]) -> float:
@@ -850,12 +887,15 @@ class JackHandGraspEnv(gym.Env):
         delta_enclosure = float(
             np.clip(metrics["stable_enclosure_steps"] - self._prev_enclosure_steps, -4.0, 4.0)
         )
+        delta_success_hold = float(
+            np.clip(metrics["success_hold_steps"] - self._prev_success_hold_steps, -4.0, 4.0)
+        )
 
         r_align_static = 0.08 * np.exp(-12.0 * metrics["mean_tip_to_obj"])
         r_palm_static = 0.12 * np.exp(-metrics["palm_err"])
         r_align_progress = 8.0 * delta_tip
         r_palm_progress = 4.0 * delta_palm
-        r_contact = 0.06 * metrics["n_tip_contacts"] + 0.08 * metrics["n_link_contacts"]
+        r_contact = 0.10 * metrics["n_tip_contacts"] + 0.04 * metrics["n_link_contacts"]
         r_contact_progress = 1.20 * max(delta_contact, 0.0)
         r_support = 0.05 * metrics["n_support_contacts"]
         r_support_progress = 1.55 * max(delta_support, 0.0)
@@ -863,8 +903,10 @@ class JackHandGraspEnv(gym.Env):
         r_opposition_hold = 0.08 if opposition_active else 0.0
         r_enclosure_progress = 0.70 * max(delta_enclosure, 0.0)
         r_hold = 0.03 * min(metrics["stable_enclosure_steps"], 4) if opposition_active else 0.0
-        r_lift_abs = 20.0 * max(metrics["height_gain"], 0.0) if enclosure_active else 0.0
+        r_lift_abs = 2.0 * min(max(metrics["height_gain"], 0.0), 0.01) if enclosure_active else 0.0
         r_lift_delta = 80.0 * max(clipped_height_delta, 0.0) if enclosure_active else 0.0
+        r_success_enter = 18.0 if metrics["success_latched"] and not self._prev_success_latched else 0.0
+        r_success_hold = 1.20 * max(delta_success_hold, 0.0) if metrics["success_latched"] else 0.0
         success_bonus = 80.0 if metrics["is_success"] else 0.0
 
         p_drift = 8.0 * metrics["lateral_drift"]
@@ -882,10 +924,12 @@ class JackHandGraspEnv(gym.Env):
             and metrics["height_gain"] < 0.002
             else 0.0
         )
-        lazy_hold_deficit = max(0.005 - metrics["height_gain"], 0.0)
+        lazy_hold_deficit = max(0.018 - metrics["height_gain"], 0.0)
         p_lazy_hold = (
-            0.22 + 12.0 * lazy_hold_deficit
-            if opposition_active and metrics["stable_enclosure_steps"] >= 6
+            0.18 + 8.0 * lazy_hold_deficit
+            if opposition_active
+            and metrics["stable_enclosure_steps"] >= _SUCCESS_STABLE_STEPS
+            and not metrics["success_latched"]
             else 0.0
         )
         p_drop = 18.0 if metrics["object_dropped"] else 0.0
@@ -907,6 +951,8 @@ class JackHandGraspEnv(gym.Env):
             + r_hold
             + r_lift_abs
             + r_lift_delta
+            + r_success_enter
+            + r_success_hold
             + success_bonus
             - p_drift
             - p_spin
@@ -954,6 +1000,10 @@ class JackHandGraspEnv(gym.Env):
             "front_support": bool(metrics["front_support"]),
             "stable_enclosure_steps": int(metrics["stable_enclosure_steps"]),
             "max_stable_enclosure_steps": int(metrics["max_stable_enclosure_steps"]),
+            "success_candidate": bool(metrics["success_candidate"]),
+            "success_latched": bool(metrics["success_latched"]),
+            "success_hold_steps": int(metrics["success_hold_steps"]),
+            "max_success_hold_steps": int(metrics["max_success_hold_steps"]),
             "lateral_drift": float(metrics["lateral_drift"]),
             "palm_local_obj": metrics["palm_local_obj"].astype(np.float32),
             "mean_tip_to_obj": float(metrics["mean_tip_to_obj"]),

@@ -1,4 +1,4 @@
-"""Train a PyTorch Soft Actor-Critic agent for three-finger grasping."""
+﻿"""Train a PyTorch Soft Actor-Critic agent for three-finger grasping."""
 
 from __future__ import annotations
 
@@ -118,9 +118,9 @@ def save_checkpoint(path: str, agent: SACAgent, train_cfg: TrainConfig, extra_st
 
 
 def make_run_name(cfg: TrainConfig) -> str:
-    if cfg.run_name:
-        return cfg.run_name
     ts = time.strftime("%Y%m%d_%H%M%S")
+    if cfg.run_name:
+        return f"{cfg.run_name}_{ts}"
     return f"sac_{cfg.object_type}_{cfg.action_mode}_{ts}"
 
 
@@ -138,7 +138,7 @@ def create_summary_writer(cfg: TrainConfig):
             )
         )
         return None, None
-    run_name = make_run_name(cfg)
+    run_name = cfg.run_name if cfg.run_name else make_run_name(cfg)
     log_dir = os.path.join(cfg.tensorboard_logdir, run_name)
     writer = SummaryWriter(log_dir=log_dir)
     return writer, log_dir
@@ -161,6 +161,12 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
 
     agent = SACAgent(obs_dim, act_dim, sac_cfg)
     replay = ReplayBuffer(obs_dim, act_dim, sac_cfg.replay_size)
+    
+    # 纭繚姣忎釜 run 鏈夌嫭绔嬬殑 logdir 鍜?save_dir
+    run_name = make_run_name(train_cfg)
+    train_cfg.run_name = run_name
+    train_cfg.save_dir = os.path.join(train_cfg.save_dir, run_name)
+    
     writer, tb_log_dir = create_summary_writer(train_cfg)
 
     if sac_cfg.normalize_obs:
@@ -273,6 +279,7 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="", help="Path to JSON config file")
     parser.add_argument("--total-steps", type=int, default=300000)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--warmup-steps", type=int, default=5000)
@@ -332,11 +339,34 @@ def parse_args():
     parser.set_defaults(learnable_alpha=False)
     parser.add_argument("--no-obs-normalization", action="store_true")
     parser.add_argument("--obs-clip", type=float, default=10.0)
+    parser.add_argument("--auto-start-tensorboard", action="store_true", help="Automatically launch tensorboard in background")
+    
+    args, remaining_argv = parser.parse_known_args()
+    if args.config:
+        with open(args.config, "r", encoding="utf-8") as f:
+            config_defaults = json.load(f)
+        parser.set_defaults(**config_defaults)
+
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    if args.auto_start_tensorboard and not args.no_tensorboard:
+        import subprocess
+        import atexit
+        try:
+            tb_process = subprocess.Popen(
+                ["tensorboard", "--logdir", args.tensorboard_logdir, "--port", "6006"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print("TensorBoard automatically started at http://localhost:6006")
+            atexit.register(lambda: tb_process.kill())
+        except Exception as e:
+            print(f"Failed to start TensorBoard automatically: {e}")
+
     train_cfg = TrainConfig(
         total_steps=args.total_steps,
         seed=args.seed,
@@ -385,3 +415,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

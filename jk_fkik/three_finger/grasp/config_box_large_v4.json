@@ -1,0 +1,14 @@
+{
+    "object_type": "box_large",
+    "total_steps": 300000,
+    "warmup_steps": 5000,
+    "update_after": 5000,
+    "eval_interval": 10000,
+    "eval_episodes": 10,
+    "save_dir": "D:\\jodell\\project\\fkik_solve\\jk_fkik\\three_finger\\grasp\\checkpoints_sac_box_large_successhold_v4_final",
+    "tensorboard_logdir": "D:\\jodell\\project\\fkik_solve\\jk_fkik\\three_finger\\grasp\\tb_runs",
+    "run_name": "box_large_successhold_v4_final",
+    "radius_randomization": false,
+    "friction_randomization": false,
+    "auto_start_tensorboard": true
+}

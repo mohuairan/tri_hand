@@ -30,13 +30,16 @@ class SACConfig:
     gamma: float = 0.99
     tau: float = 0.005
     actor_lr: float = 3e-4
-    critic_lr: float = 3e-4
+    critic_lr: float = 1e-4
     alpha_lr: float = 3e-4
     batch_size: int = 256
     replay_size: int = 500_000
     learnable_alpha: bool = False
     init_alpha: float = 0.05
+    alpha_min: float = 0.002
+    alpha_max: float = 0.1
     target_entropy_scale: float = 1.0
+    critic_grad_clip: float = 10.0
     normalize_obs: bool = True
     obs_clip: float = 10.0
 
@@ -190,6 +193,8 @@ class SACAgent:
         self.q2_opt = torch.optim.Adam(self.q2.parameters(), lr=cfg.critic_lr)
 
         self.target_entropy = -cfg.target_entropy_scale * act_dim
+        self.alpha_min = float(cfg.alpha_min)
+        self.alpha_max = float(cfg.alpha_max)
         self.log_alpha = torch.tensor(
             np.log(cfg.init_alpha), device=self.device, dtype=torch.float32, requires_grad=True)
         self.alpha_opt = torch.optim.Adam([self.log_alpha], lr=cfg.alpha_lr)
@@ -205,6 +210,32 @@ class SACAgent:
     @property
     def alpha(self) -> torch.Tensor:
         return self.log_alpha.exp()
+
+    def _clamp_log_alpha(self):
+        lo = float(np.log(max(self.alpha_min, 1e-8)))
+        hi = float(np.log(max(self.alpha_max, self.alpha_min + 1e-8)))
+        self.log_alpha.data.clamp_(lo, hi)
+
+    def set_alpha_schedule_phase(
+        self,
+        *,
+        learnable_alpha: bool,
+        target_entropy_scale: float,
+        alpha_min: float,
+        alpha_max: float,
+        fixed_alpha: float | None = None,
+    ):
+        self.cfg.learnable_alpha = bool(learnable_alpha)
+        self.alpha_min = float(alpha_min)
+        self.alpha_max = float(alpha_max)
+        self.cfg.alpha_min = self.alpha_min
+        self.cfg.alpha_max = self.alpha_max
+        self.cfg.target_entropy_scale = float(target_entropy_scale)
+        self.target_entropy = -float(target_entropy_scale) * self.act_dim
+        if fixed_alpha is not None:
+            alpha_value = float(np.clip(fixed_alpha, self.alpha_min, self.alpha_max))
+            self.log_alpha.data.fill_(float(np.log(max(alpha_value, 1e-8))))
+        self._clamp_log_alpha()
 
     def update_obs_norm(self, *obs_batches: np.ndarray):
         if not self.cfg.normalize_obs:
@@ -244,10 +275,14 @@ class SACAgent:
 
         self.q1_opt.zero_grad(set_to_none=True)
         q1_loss.backward()
+        if self.cfg.critic_grad_clip > 0.0:
+            nn.utils.clip_grad_norm_(self.q1.parameters(), self.cfg.critic_grad_clip)
         self.q1_opt.step()
 
         self.q2_opt.zero_grad(set_to_none=True)
         q2_loss.backward()
+        if self.cfg.critic_grad_clip > 0.0:
+            nn.utils.clip_grad_norm_(self.q2.parameters(), self.cfg.critic_grad_clip)
         self.q2_opt.step()
 
         new_actions, logp, _ = self.actor(obs, deterministic=False, with_logprob=True)
@@ -264,6 +299,7 @@ class SACAgent:
             self.alpha_opt.zero_grad(set_to_none=True)
             alpha_loss.backward()
             self.alpha_opt.step()
+            self._clamp_log_alpha()
             alpha_loss_value = float(alpha_loss.item())
 
         self._soft_update(self.q1, self.q1_target, self.cfg.tau)

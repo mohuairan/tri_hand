@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import random
+import sys
 import time
 from dataclasses import asdict, dataclass
 
@@ -45,6 +46,20 @@ class TrainConfig:
     use_tensorboard: bool = True
     tensorboard_logdir: str = "jk_fkik/three_finger/grasp/tb_runs"
     run_name: str = ""
+    use_success_alpha_schedule: bool = False
+    success_rate_ema_beta: float = 0.8
+    alpha_phase1_threshold: float = 0.03
+    alpha_phase2_threshold: float = 0.10
+    alpha_phase3_threshold: float = 0.20
+    alpha_phase1_min: float = 0.01
+    alpha_phase1_max: float = 0.06
+    alpha_phase1_entropy: float = 0.8
+    alpha_phase2_min: float = 0.005
+    alpha_phase2_max: float = 0.03
+    alpha_phase2_entropy: float = 0.45
+    alpha_phase3_min: float = 0.002
+    alpha_phase3_max: float = 0.015
+    alpha_phase3_entropy: float = 0.2
 
 
 def make_env(cfg: TrainConfig, render_mode=None):
@@ -150,6 +165,49 @@ def writer_add_scalar_dict(writer, prefix: str, stats: dict, step: int):
             writer.add_scalar(f"{prefix}/{key}", float(value), step)
 
 
+def get_success_alpha_phase(train_cfg: TrainConfig, success_rate_ema: float, current_phase: int) -> int:
+    phase = current_phase
+    if phase < 1 and success_rate_ema >= train_cfg.alpha_phase1_threshold:
+        phase = 1
+    if phase < 2 and success_rate_ema >= train_cfg.alpha_phase2_threshold:
+        phase = 2
+    if phase < 3 and success_rate_ema >= train_cfg.alpha_phase3_threshold:
+        phase = 3
+    return phase
+
+
+def apply_success_alpha_phase(agent: SACAgent, train_cfg: TrainConfig, sac_cfg: SACConfig, phase: int):
+    if phase <= 0:
+        agent.set_alpha_schedule_phase(
+            learnable_alpha=False,
+            target_entropy_scale=sac_cfg.target_entropy_scale,
+            alpha_min=sac_cfg.init_alpha,
+            alpha_max=sac_cfg.init_alpha,
+            fixed_alpha=sac_cfg.init_alpha,
+        )
+    elif phase == 1:
+        agent.set_alpha_schedule_phase(
+            learnable_alpha=True,
+            target_entropy_scale=train_cfg.alpha_phase1_entropy,
+            alpha_min=train_cfg.alpha_phase1_min,
+            alpha_max=train_cfg.alpha_phase1_max,
+        )
+    elif phase == 2:
+        agent.set_alpha_schedule_phase(
+            learnable_alpha=True,
+            target_entropy_scale=train_cfg.alpha_phase2_entropy,
+            alpha_min=train_cfg.alpha_phase2_min,
+            alpha_max=train_cfg.alpha_phase2_max,
+        )
+    else:
+        agent.set_alpha_schedule_phase(
+            learnable_alpha=True,
+            target_entropy_scale=train_cfg.alpha_phase3_entropy,
+            alpha_min=train_cfg.alpha_phase3_min,
+            alpha_max=train_cfg.alpha_phase3_max,
+        )
+
+
 def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
     set_seed(train_cfg.seed)
     train_render = "human" if train_cfg.render else None
@@ -184,6 +242,11 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
     episode_len = 0
     episode_idx = 0
     latest_update = {}
+    success_rate_ema = 0.0
+    alpha_phase = 0
+
+    if train_cfg.use_success_alpha_schedule:
+        apply_success_alpha_phase(agent, train_cfg, sac_cfg, alpha_phase)
 
     for step in range(1, train_cfg.total_steps + 1):
         if step <= train_cfg.warmup_steps:
@@ -242,10 +305,21 @@ def train(train_cfg: TrainConfig, sac_cfg: SACConfig):
 
         if step % train_cfg.eval_interval == 0:
             eval_stats = evaluate(agent, train_cfg, train_cfg.seed + step * 13)
+            if train_cfg.use_success_alpha_schedule:
+                success_rate_ema = (
+                    train_cfg.success_rate_ema_beta * success_rate_ema
+                    + (1.0 - train_cfg.success_rate_ema_beta) * eval_stats["success_rate"]
+                )
+                new_phase = get_success_alpha_phase(train_cfg, success_rate_ema, alpha_phase)
+                if new_phase != alpha_phase:
+                    alpha_phase = new_phase
+                    apply_success_alpha_phase(agent, train_cfg, sac_cfg, alpha_phase)
             stats = {
                 "iter_type": "eval",
                 "step": step,
                 "replay_size": int(replay.size),
+                "success_rate_ema": float(success_rate_ema),
+                "alpha_phase": int(alpha_phase),
                 **eval_stats,
             }
             if latest_update:
@@ -316,10 +390,26 @@ def parse_args():
     parser.add_argument("--tensorboard-logdir", type=str, default="jk_fkik/three_finger/grasp/tb_runs")
     parser.add_argument("--run-name", type=str, default="")
     parser.add_argument("--no-tensorboard", action="store_true")
+    parser.add_argument("--use-success-alpha-schedule", dest="use_success_alpha_schedule", action="store_true")
+    parser.add_argument("--no-success-alpha-schedule", dest="use_success_alpha_schedule", action="store_false")
+    parser.add_argument("--success-rate-ema-beta", type=float, default=0.8)
+    parser.add_argument("--alpha-phase1-threshold", type=float, default=0.03)
+    parser.add_argument("--alpha-phase2-threshold", type=float, default=0.10)
+    parser.add_argument("--alpha-phase3-threshold", type=float, default=0.20)
+    parser.add_argument("--alpha-phase1-min", type=float, default=0.01)
+    parser.add_argument("--alpha-phase1-max", type=float, default=0.06)
+    parser.add_argument("--alpha-phase1-entropy", type=float, default=0.8)
+    parser.add_argument("--alpha-phase2-min", type=float, default=0.005)
+    parser.add_argument("--alpha-phase2-max", type=float, default=0.03)
+    parser.add_argument("--alpha-phase2-entropy", type=float, default=0.45)
+    parser.add_argument("--alpha-phase3-min", type=float, default=0.002)
+    parser.add_argument("--alpha-phase3-max", type=float, default=0.015)
+    parser.add_argument("--alpha-phase3-entropy", type=float, default=0.2)
     parser.set_defaults(
         radius_randomization=False,
         friction_randomization=False,
         lock_wrist_rotation=True,
+        use_success_alpha_schedule=False,
     )
 
     parser.add_argument("--device", type=str, default="auto")
@@ -328,11 +418,14 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--tau", type=float, default=0.005)
     parser.add_argument("--actor-lr", type=float, default=3e-4)
-    parser.add_argument("--critic-lr", type=float, default=3e-4)
+    parser.add_argument("--critic-lr", type=float, default=1e-4)
     parser.add_argument("--alpha-lr", type=float, default=3e-4)
+    parser.add_argument("--critic-grad-clip", type=float, default=10.0)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--replay-size", type=int, default=500000)
     parser.add_argument("--init-alpha", type=float, default=0.05)
+    parser.add_argument("--alpha-min", type=float, default=0.002)
+    parser.add_argument("--alpha-max", type=float, default=0.1)
     parser.add_argument("--target-entropy-scale", type=float, default=1.0)
     parser.add_argument("--learnable-alpha", dest="learnable_alpha", action="store_true")
     parser.add_argument("--fixed-alpha", dest="learnable_alpha", action="store_false")
@@ -358,7 +451,7 @@ def main():
         import atexit
         try:
             tb_process = subprocess.Popen(
-                ["tensorboard", "--logdir", args.tensorboard_logdir, "--port", "6006"],
+                [sys.executable, "-m", "tensorboard.main", "--logdir", args.tensorboard_logdir, "--port", "6006"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
@@ -390,6 +483,20 @@ def main():
         use_tensorboard=not args.no_tensorboard,
         tensorboard_logdir=args.tensorboard_logdir,
         run_name=args.run_name,
+        use_success_alpha_schedule=args.use_success_alpha_schedule,
+        success_rate_ema_beta=args.success_rate_ema_beta,
+        alpha_phase1_threshold=args.alpha_phase1_threshold,
+        alpha_phase2_threshold=args.alpha_phase2_threshold,
+        alpha_phase3_threshold=args.alpha_phase3_threshold,
+        alpha_phase1_min=args.alpha_phase1_min,
+        alpha_phase1_max=args.alpha_phase1_max,
+        alpha_phase1_entropy=args.alpha_phase1_entropy,
+        alpha_phase2_min=args.alpha_phase2_min,
+        alpha_phase2_max=args.alpha_phase2_max,
+        alpha_phase2_entropy=args.alpha_phase2_entropy,
+        alpha_phase3_min=args.alpha_phase3_min,
+        alpha_phase3_max=args.alpha_phase3_max,
+        alpha_phase3_entropy=args.alpha_phase3_entropy,
     )
     sac_cfg = SACConfig(
         device=args.device,
@@ -404,7 +511,10 @@ def main():
         replay_size=args.replay_size,
         learnable_alpha=args.learnable_alpha,
         init_alpha=args.init_alpha,
+        alpha_min=args.alpha_min,
+        alpha_max=args.alpha_max,
         target_entropy_scale=args.target_entropy_scale,
+        critic_grad_clip=args.critic_grad_clip,
         normalize_obs=not args.no_obs_normalization,
         obs_clip=args.obs_clip,
     )

@@ -213,6 +213,7 @@ jk_fkik/three_finger/grasp/jk_fkik/
 jk_fkik/three_finger/grasp/recordings_*/
 jk_fkik/three_finger/grasp/debug_*.png
 jk_fkik/three_finger/grasp/tb_runs/
+jk_fkik/three_finger/grasp/logs/
 
 # Local SSH scratch files
 tempkey

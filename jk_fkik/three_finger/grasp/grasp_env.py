@@ -932,6 +932,11 @@ class JackHandGraspEnv(gym.Env):
             and not metrics["success_latched"]
             else 0.0
         )
+        p_bob = (
+            8.0 * max(abs(metrics["height_delta"]) - 0.0008, 0.0)
+            if metrics["success_latched"]
+            else 0.0
+        )
         p_drop = 18.0 if metrics["object_dropped"] else 0.0
         p_off_table = 10.0 if metrics["object_off_table"] else 0.0
         p_time = 0.08
@@ -959,6 +964,7 @@ class JackHandGraspEnv(gym.Env):
             - p_embed
             - p_contact_stall
             - p_lazy_hold
+            - p_bob
             - p_drop
             - p_off_table
             - p_time

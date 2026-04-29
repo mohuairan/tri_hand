@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 import cv2
@@ -77,6 +78,8 @@ def main():
         randomize_object_radius=bool(train_cfg.get("randomize_object_radius", False)),
         randomize_object_friction=bool(train_cfg.get("randomize_object_friction", False)),
     )
+    step_dt = env.base_env.model.opt.timestep * env.base_env.n_substeps
+    render_sleep = max(0.0, step_dt * (args.slowdown - 1.0))
 
     record_dir = Path(args.record_dir) if args.record_dir else None
     if record_dir is not None:
@@ -84,7 +87,6 @@ def main():
         record_renderer = mujoco.Renderer(
             env.base_env.model, args.record_height, args.record_width)
         record_camera = make_free_camera()
-        step_dt = env.base_env.model.opt.timestep * env.base_env.n_substeps
         frames_per_step = max(
             1, int(round(args.record_fps * step_dt * args.slowdown)))
         start_hold_frames = max(1, int(round(args.record_fps * args.start_hold)))
@@ -106,6 +108,8 @@ def main():
         obs, _ = env.reset(seed=args.seed + ep)
         if args.render:
             env.render()
+            if render_sleep > 0.0:
+                time.sleep(render_sleep)
         if record_dir is not None:
             video_path = record_dir / f"episode_{ep:02d}.mp4"
             writer = cv2.VideoWriter(
@@ -126,6 +130,8 @@ def main():
             obs, reward, terminated, truncated, info = env.step(action)
             if args.render:
                 env.render()
+                if render_sleep > 0.0:
+                    time.sleep(render_sleep)
             if writer is not None:
                 frame = render_free_camera(env, record_renderer, record_camera)
                 write_frame(writer, frame, frames_per_step)
